@@ -3,6 +3,7 @@ import { Construct } from 'constructs';
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as ecs_patterns from "aws-cdk-lib/aws-ecs-patterns";
+import * as ecr from "aws-cdk-lib/aws-ecr";
 
 export class MyEcsStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -29,11 +30,18 @@ export class MyEcsStack extends Stack {
         },
         {
           cidrMask: 24,
-          name: 'management',
-          subnetType: ec2.SubnetType.PRIVATE_WITH_NAT,
+          name: 'egress',
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
         }
      ] 
     });
+
+    new ecr.Repository(this, 'sbcntr-backend', {
+      encryption: ecr.RepositoryEncryption.KMS
+    });
+    new ecr.Repository(this, 'sbcntr-frontend', {
+      encryption: ecr.RepositoryEncryption.KMS
+    })
 
     const cluster = new ecs.Cluster(this, "sbcntr-ecs-cluster", {
       vpc: vpc
@@ -44,7 +52,7 @@ export class MyEcsStack extends Stack {
       cluster: cluster, // Required
       cpu: 512, // Default is 256
       desiredCount: 1, // Default is 1
-      taskImageOptions: { image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample") },
+      // taskImageOptions: { image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample") },
       memoryLimitMiB: 1024, // Default is 512
       publicLoadBalancer: true // Default is false
     });
