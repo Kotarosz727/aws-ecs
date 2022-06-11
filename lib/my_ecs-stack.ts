@@ -87,10 +87,10 @@ export class MyEcsStack extends Stack {
     });
 
     //ecr
-    new ecr.Repository(this, 'sbcntr-backend', {
+    const backend_img = new ecr.Repository(this, 'sbcntr-backend', {
       encryption: ecr.RepositoryEncryption.KMS
     });
-    new ecr.Repository(this, 'sbcntr-frontend', {
+    const frontend_img = new ecr.Repository(this, 'sbcntr-frontend', {
       encryption: ecr.RepositoryEncryption.KMS
     })
 
@@ -99,12 +99,26 @@ export class MyEcsStack extends Stack {
       vpc: vpc
     });
 
+    const taskDef = new ecs.FargateTaskDefinition(this, "ServiceTaskDefinition", {
+      memoryLimitMiB: 512,
+      cpu: 256,
+    });
+
+    taskDef.addContainer("ServiceTaskContainerDefinition", {
+      image: ecs.ContainerImage.fromEcrRepository(backend_img),
+    }).addPortMappings({
+      containerPort: 80,
+      protocol: ecs.Protocol.TCP,
+    });
+
     // Create a load-balanced Fargate service and make it public
     new ecs_patterns.ApplicationLoadBalancedFargateService(this, "sbcntr-fargate-service", {
+      serviceName: 'sbcntr-ecs-backend-service',
       cluster: cluster, // Required
       cpu: 512, // Default is 256
-      desiredCount: 1, // Default is 1
-      taskImageOptions: { image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample") },
+      desiredCount: 2, // Default is 1
+      taskDefinition: taskDef,
+      // taskImageOptions: { image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample") },
       memoryLimitMiB: 1024, // Default is 512
       publicLoadBalancer: true, // Default is false
       loadBalancerName: 'sbcntr-alb-intrnal',
