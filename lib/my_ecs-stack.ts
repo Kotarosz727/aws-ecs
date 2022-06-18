@@ -4,6 +4,7 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as ecs_patterns from "aws-cdk-lib/aws-ecs-patterns";
 import * as ecr from "aws-cdk-lib/aws-ecr";
+import elbv2 = require('aws-cdk-lib/aws-elasticloadbalancingv2');
 
 export class MyEcsStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -71,13 +72,16 @@ export class MyEcsStack extends Stack {
     });
 
     //Interface型VPCエンドポイント
-    vpc.addInterfaceEndpoint('sbcntr-vpc-log', {
+    vpc.addInterfaceEndpoint('sbcntr-log', {
       service: ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
-      subnets: {subnetGroupName: 'egress'}
+      subnets: {subnetGroupName: 'egress'},
+      securityGroups: [egress_sg]
     });
-    vpc.addInterfaceEndpoint('sbcntr-vpc-ecr', {
+
+    vpc.addInterfaceEndpoint('sbcntr-ecr', {
       service: ec2.InterfaceVpcEndpointAwsService.ECR,
-      subnets: {subnetGroupName: 'egress'}
+      subnets: {subnetGroupName: 'egress'},
+      securityGroups: [egress_sg]
     });
 
     //Gateway型エンドポイント
@@ -88,10 +92,12 @@ export class MyEcsStack extends Stack {
 
     //ecr
     const backend_img = new ecr.Repository(this, 'sbcntr-backend', {
-      encryption: ecr.RepositoryEncryption.KMS
+      encryption: ecr.RepositoryEncryption.KMS,
+      imageScanOnPush: true,
     });
     const frontend_img = new ecr.Repository(this, 'sbcntr-frontend', {
-      encryption: ecr.RepositoryEncryption.KMS
+      encryption: ecr.RepositoryEncryption.KMS,
+      imageScanOnPush: true,
     })
 
     //クラスター
@@ -105,6 +111,7 @@ export class MyEcsStack extends Stack {
     });
 
     taskDef.addContainer("ServiceTaskContainerDefinition", {
+      // logging: ecs.LogDrivers.awsLogs({streamPrefix: 'sbcntr-backend'}),
       image: ecs.ContainerImage.fromEcrRepository(backend_img),
     }).addPortMappings({
       containerPort: 80,
@@ -114,14 +121,43 @@ export class MyEcsStack extends Stack {
     // Create a load-balanced Fargate service and make it public
     new ecs_patterns.ApplicationLoadBalancedFargateService(this, "sbcntr-fargate-service", {
       serviceName: 'sbcntr-ecs-backend-service',
-      cluster: cluster, // Required
-      cpu: 512, // Default is 256
-      desiredCount: 2, // Default is 1
+      cluster: cluster, 
+      cpu: 512, 
+      desiredCount: 2,
       taskDefinition: taskDef,
       // taskImageOptions: { image: ecs.ContainerImage.fromRegistry("amazon/amazon-ecs-sample") },
-      memoryLimitMiB: 1024, // Default is 512
-      publicLoadBalancer: true, // Default is false
+      memoryLimitMiB: 512,
+      publicLoadBalancer: false,
       loadBalancerName: 'sbcntr-alb-intrnal',
+      deploymentController: {
+        type: ecs.DeploymentControllerType.CODE_DEPLOY,
+      },
+      taskSubnets: { subnetGroupName:'application' },
+    });
+
+    //front用クラスター
+    const frontendCluster = new ecs.Cluster(this, "sbcntr-ecs-front-cluster", {
+      vpc: vpc
+    });
+
+    const frontendTaskDef = new ecs.FargateTaskDefinition(this, "ServiceTaskFrontDefinition", {
+      memoryLimitMiB: 512,
+      cpu: 256,
+
+    });
+
+    frontendTaskDef.addContainer("ServiceTaskContainerFrontDefinition", {
+      logging: ecs.LogDrivers.awsLogs({streamPrefix: 'sbcntr-frontend'}),
+      image: ecs.ContainerImage.fromEcrRepository(frontend_img),
+    }).addPortMappings({
+      containerPort: 80,
+      protocol: ecs.Protocol.TCP,
+    });
+
+    const frontlb = new elbv2.ApplicationLoadBalancer(this, 'front-LB', {
+      vpc,
+      internetFacing: true,
+      loadBalancerName: 'sbcntr-front-lb'
     });
   }
 }
